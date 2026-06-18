@@ -175,9 +175,25 @@ class Session:
         repomap = build_repomap(self.cfg.workspace)
         tools_block = toolmod.render_tools_block(self.registry)
         memory = self.store.render_memory() if getattr(self, "store", None) else ""
+        prof = self._profile()
         return prompt.build_system(tools_block, str(self.cfg.workspace), repomap,
                                    policy, memory=memory, persona=self.cfg.persona,
-                                   user_name=self.cfg.user_name)
+                                   user_name=self.cfg.user_name, profile=prof)
+
+    def _profile(self) -> str:
+        """Build the auto-detected project profile once and cache + persist it."""
+        cached = getattr(self, "_profile_cache", None)
+        if cached is not None:
+            return cached
+        try:
+            from . import profile as profmod
+            text = profmod.build_profile(self.cfg.workspace)
+            if getattr(self, "store", None):
+                self.store.save_profile(text)
+        except Exception:
+            text = ""
+        self._profile_cache = text
+        return text
 
     # ---- gating -----------------------------------------------------------
     def _default_confirm(self, tool, args):

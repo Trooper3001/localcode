@@ -453,15 +453,17 @@ anything non-trivial you can ask for a second look.
    render, streaming, thinking toggle, raw-completion smoke test.
 2. **M1 — Tool loop** ✅: registry, raw-text protocol, parser, fs + edit + exec
    tools, syntax-check observation, single-task one-shot run.
-3. **M2 — Verification loop** ◑: ReAct loop with syntax gate, **step budget**,
-   **stuck detection**, **real abort/cancel** (mid-request) all done. Full
-   staged PLAN→ACT→VERIFY→DEBUG with an enforced *test* gate still pending.
+3. **M2 — Verification loop** ✅: ReAct loop with syntax gate, **step budget**,
+   **stuck detection**, **real abort/cancel** (mid-request), and an **enforced
+   test-gate** (won't accept "done" while the project's tests fail when a run
+   changed code — verified it catches an unmentioned bug). Empty-reply guard.
 4. **M3 — Context economy** ✅: repo map, **adaptive reasoning** (think only on
    step 1 + after errors — ~3× faster), budgeted **summarize-and-evict**
    trimming, live token/step counter in the TUI footer.
-5. **M4 — Project learning** ◑: **memory.md + `remember` tool** + auto-load
-   into the system prompt done; **resumable sessions** (`--continue`/`--resume`)
-   done. Auto-generated PROFILE.md still pending.
+5. **M4 — Project learning** ✅: **memory.md + `remember` tool** + auto-load,
+   **resumable sessions** (`--continue`/`--resume`), and **auto-generated
+   PROFILE.md** (language, test command, entry points, deps — detected once,
+   loaded compactly so the agent doesn't re-explore each session).
 6. **M5 — System/Docker tools** ✅ + interactive **full-screen TUI** (Cthulhu
    theme, slash commands, clipboard image paste, confirmation overlay) done.
 7. **M6 — Local hardening** ☐: validate full parity on GGUF Q4/Q5, latency/token

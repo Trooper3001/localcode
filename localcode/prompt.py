@@ -56,7 +56,7 @@ you finish. Do not claim success you have not verified.
 - When you learn a durable fact about this project (how to run tests, where \
 something lives, a gotcha), call remember(fact) so future sessions know it.
 - Be terse. Every token costs latency on local inference.
-{persona}{policy}{memory}
+{persona}{policy}{memory}{profile}
 Tools available to you:
 {tools}
 
@@ -84,7 +84,7 @@ hard? ...for you, apparently." """
 
 def build_system(tools_block: str, workspace: str, repomap: str,
                  policy: str = "", memory: str = "", persona: bool = True,
-                 user_name: str = "") -> str:
+                 user_name: str = "", profile: str = "") -> str:
     pol = f"\n{policy}\n" if policy else ""
     per = ""
     if persona:
@@ -94,9 +94,10 @@ def build_system(tools_block: str, workspace: str, repomap: str,
                     f"with affectionate exasperation.")
         per += "\n"
     mem = f"\nWhat you already know about this project (memory):\n{memory}\n" if memory else ""
+    prof = f"\n{profile}\n" if profile else ""
     return SYSTEM.format(tools=tools_block, workspace=workspace,
                          repomap=repomap or "(empty)", policy=pol,
-                         persona=per, memory=mem)
+                         persona=per, memory=mem, profile=prof)
 
 
 def strip_think(text: str) -> str:
