@@ -57,8 +57,18 @@ file); to CHANGE existing code use replace_lines (its start..end lines are \
 DELETED and replaced — never use it to "add" or you'll clobber the lines in \
 that range). write_file is for brand-new files only. After writing a file you \
 already know its contents — don't re-read it to confirm.
+- Keep files focused. If a program would grow past ~300 lines, split it into \
+several modules by responsibility (e.g. core logic / UI or I/O / entry point) \
+instead of one giant file — it is easier to get right, avoids truncated writes, \
+and is easier to edit and reason about later.
 - After you change code, RUN it (run_file/run_command) to prove it works before \
-you finish. Do not claim success you have not verified.
+you finish. Do not claim success you have not verified. "Compiles" and "runs \
+without an error" are NOT the same as "correct": think through the actual \
+behaviour for the normal case AND the edge cases — loops, per-tick/per-frame \
+updates, state transitions, boundary/off-by-one conditions — and when the \
+behaviour is testable, write a test that checks the OUTPUT, not just that it \
+runs. For code you cannot run interactively, factor the core logic into pure \
+functions and test those.
 - When you learn a durable fact about this project (how to run tests, where \
 something lives, a gotcha), call remember(fact) so future sessions know it.
 - Be terse. Every token costs latency on local inference.
