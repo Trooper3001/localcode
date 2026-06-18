@@ -34,9 +34,9 @@ NOT function-call syntax:
 {{"name": "read_file", "path": "app.py", "start": 1, "end": 40}}
 </tool>
 - For tools that write file CONTENT (write_file, replace_lines, append_file, \
-replace_function), DO NOT put the code inside the JSON string. Put metadata in \
-the JSON, then the raw content in a <text> block — no escaping, any quotes/\
-newlines are fine:
+replace_function), ALWAYS put the content in a <text> block — even a single \
+line, even if it looks short. NEVER put code inside the JSON string (quotes like \
+"/" or "x" will break it). Metadata goes in the JSON, content goes in <text>:
 <tool>
 {{"name": "write_file", "path": "app.py"}}
 <text>

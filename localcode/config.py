@@ -80,6 +80,7 @@ class Config:
     review: bool = False                  # self-review the run's diff when done
     verbosity: str = "normal"             # quiet | normal | verbose
     persona: bool = True                  # tsundere/sarcastic helpful voice
+    test_gate: bool = True                # block "done" while project tests fail
 
     @classmethod
     def load(cls, **overrides) -> "Config":
@@ -122,7 +123,8 @@ class Config:
             if v is not None:
                 setattr(c, k, v)
         for flag in ("think", "allow_writes", "dry_run", "read_only",
-                     "web_enabled", "docker_enabled", "review", "persona"):
+                     "web_enabled", "docker_enabled", "review", "persona",
+                     "test_gate"):
             v = pick(flag)
             if v is not None:
                 setattr(c, flag, v)

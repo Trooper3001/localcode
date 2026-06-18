@@ -48,6 +48,8 @@ def build_parser():
     p.add_argument("--resume", metavar="ID", help="resume a specific session id")
     p.add_argument("--sessions", action="store_true", help="list saved sessions and exit")
     p.add_argument("--no-persona", action="store_true", help="disable the tsundere voice")
+    p.add_argument("--no-test-gate", action="store_true",
+                   help="don't block 'done' on failing project tests")
     return p
 
 
@@ -63,6 +65,7 @@ def cfg_from_args(a) -> Config:
         review=True if a.review else None,
         think=False if a.no_think else None,
         persona=False if a.no_persona else None,
+        test_gate=False if a.no_test_gate else None,
         verbosity=verbosity,
     )
 

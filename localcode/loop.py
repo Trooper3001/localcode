@@ -9,9 +9,12 @@ from __future__ import annotations
 import re
 import sys
 import json
+import shutil
 import difflib
 import pathlib
 import threading
+import subprocess
+import importlib.util
 
 from . import prompt, parser, tools as toolmod, art, backend as backendmod, store as storemod
 
@@ -107,6 +110,13 @@ def build_repomap(workspace: pathlib.Path, max_lines=60) -> str:
 
 class Cancelled(Exception):
     pass
+
+
+def _module_available(name: str) -> bool:
+    try:
+        return importlib.util.find_spec(name) is not None
+    except Exception:
+        return False
 
 
 class Session:
@@ -252,6 +262,9 @@ class Session:
         steps = 0
         recent = []       # signatures of recent calls, for stuck detection
         last_error = False  # did the previous step's observation fail?
+        gate_attempts = 0   # how many times the test-gate has bounced a "done"
+        force_no_think = False  # next step: think off (e.g. after an empty reply)
+        empty_strikes = 0   # consecutive empty replies, to avoid spinning forever
         try:
             while steps < self.cfg.max_steps:
                 if self.cancel_event.is_set():
@@ -266,12 +279,14 @@ class Session:
                 # Adaptive reasoning (SPEC §3): think only when it pays — the first
                 # step (planning) and after an error/stuck (debugging). Routine tool
                 # steps run think-off, which is far cheaper and faster on a 27B.
-                think_step = self.cfg.think and (steps == 1 or last_error)
+                think_step = (self.cfg.think and (steps == 1 or last_error)
+                              and not force_no_think)
+                force_no_think = False
                 try:
                     out = self.backend.generate(
                         self.messages,
                         stop=["</tool>", "</tool_call>"],
-                        max_tokens=1500,
+                        max_tokens=2048,
                         temperature=self.cfg.temperature,
                         think=think_step,
                         on_token=(self._stream if verbose else None),
@@ -284,8 +299,40 @@ class Session:
                     self._set_busy(False)
                 if self.cancel_event.is_set():
                     return self._on_cancel()
+                # Empty reply (e.g. reasoning consumed the whole token budget) is
+                # NOT a finished answer — re-prompt with think off so the model has
+                # room to actually produce output. Guard against infinite spinning.
+                if not out.strip() and not parser.has_tool_call(out):
+                    empty_strikes += 1
+                    if empty_strikes >= 3:
+                        self.ui.info("model kept returning empty output — stopping.")
+                        return None
+                    self.ui.tool("(empty)", "", "no output — retrying", ok=False)
+                    self.messages.append({"role": "user", "content":
+                        "<obs>You returned no output. Respond with ONE tool call "
+                        "now, or a brief final answer. Keep reasoning short.</obs>"})
+                    force_no_think = True
+                    continue
+                empty_strikes = 0
+
                 if not parser.has_tool_call(out):
-                    # final answer
+                    # Candidate final answer. If the run changed code, don't accept
+                    # "done" until the project's tests actually pass (SPEC §7 gate).
+                    gate = self._test_gate(gate_attempts)
+                    if gate is not None:
+                        passed, cmd, output = gate
+                        self.ui.tool("test-gate", cmd,
+                                     "passed" if passed else "FAILED — keep going",
+                                     ok=passed)
+                        if not passed:
+                            gate_attempts += 1
+                            self.messages.append({"role": "assistant", "content": out})
+                            self.messages.append({"role": "user", "content":
+                                f"<obs>[test-gate] You haven't finished — `{cmd}` "
+                                f"still fails:\n{output}\nFix it, then report done.</obs>"})
+                            last_error = True
+                            self._save()
+                            continue
                     self.ui.final(out)
                     self.messages.append({"role": "assistant", "content": out})
                     if self.cfg.review:
@@ -386,6 +433,41 @@ class Session:
         fn = getattr(self.ui, "set_busy", None)
         if fn:
             fn(busy)
+
+    # ---- test gate (SPEC §7) ---------------------------------------------
+    def _detect_test_cmd(self) -> str | None:
+        """Find how to run this project's tests. Prefer a remembered command,
+        else auto-detect pytest when test files exist."""
+        for fact in (self.store.load_memory() if self.store else []):
+            m = re.search(r"tests?[^.]*?\b(pytest[\w .\-]*|python3? -m \w[\w .\-]*|"
+                          r"npm test|make test|go test[\w .\-]*|cargo test)", fact, re.I)
+            if m:
+                return m.group(1).strip()
+        ws = self.cfg.workspace
+        has_pytests = any(ws.rglob("test_*.py")) or any(ws.rglob("*_test.py")) \
+            or (ws / "tests").is_dir()
+        if has_pytests and (shutil.which("pytest") or _module_available("pytest")):
+            return "python3 -m pytest -q"
+        return None
+
+    def _test_gate(self, attempts):
+        """Return (passed, cmd, output) if the gate ran, else None (no gate).
+        Gate only when: enabled, not read-only, code changed this run, a test
+        command exists, and we haven't bounced too many times."""
+        if (not self.cfg.test_gate or self.cfg.read_only or attempts >= 2
+                or not (self.ctx.journal or self.ctx.written)):
+            return None
+        cmd = self._detect_test_cmd()
+        if not cmd:
+            return None
+        try:
+            proc = subprocess.run(cmd, cwd=self.cfg.workspace, shell=True,
+                                   capture_output=True, text=True, timeout=120)
+        except Exception as e:
+            return None  # can't run tests → don't block on it
+        out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        passed = proc.returncode == 0
+        return passed, cmd, out[-1500:]
 
     def cancel(self):
         """Cancel the run now — aborts the in-flight request and stops the loop."""
