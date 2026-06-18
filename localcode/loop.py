@@ -249,13 +249,15 @@ class Session:
         except Exception as e:
             return f"error: {type(e).__name__}: {e}"
 
-        # Show a diff for surgical EDITS (the point is the small delta). For
-        # write_file (whole-file create/overwrite) the diff is the entire file —
-        # noise — so we skip it; the result line already says "wrote X (N lines)".
-        if tool.mutates and path and name != "write_file":
+        # Show a diff for surgical edits and for OVERWRITES of an existing file
+        # (a real change). Skip only brand-new files written by write_file, where
+        # the "diff" would just be the whole file as additions (noise).
+        if tool.mutates and path:
             p = self.ctx.workspace / path
             after = p.read_text(errors="ignore") if p.exists() else ""
-            self.ui.diff(toolmod._rel(self.ctx, p.resolve()), before, after)
+            brand_new = name == "write_file" and not (before or "").strip()
+            if not brand_new and (before or "") != (after or ""):
+                self.ui.diff(toolmod._rel(self.ctx, p.resolve()), before, after)
         return result
 
     # ---- message assembly -------------------------------------------------

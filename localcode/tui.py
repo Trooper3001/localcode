@@ -17,9 +17,10 @@ sets the session's cancel event; it stops at the next step boundary).
 """
 from __future__ import annotations
 
+import os
+import re
 import curses
 import threading
-import re
 import difflib
 import textwrap
 
@@ -98,16 +99,20 @@ HELP = [
     "  /verbose         cycle quiet → normal → verbose",
     "  /undo            revert this run's file changes",
     "  /resume          continue the last run",
-    "  /sessions        list saved sessions  ·  /load ID  to resume one",
+    "  /sessions        list saved sessions  ·  /load <#|id>  to resume one",
+    "  /resume          resume & replay the most recent session",
     "  /clear           clear the transcript",
     "  /help · /quit",
-    "keys: Enter=send · paste multi-line text directly · Ctrl-V=paste image · Esc=cancel · Ctrl-Q=quit",
+    "keys: Enter=send · Tab=complete command · paste multi-line text · Ctrl-V=image · Esc=cancel · Ctrl-Q=quit",
 ]
 
 
 # style names → color-pair ids (assigned in _init_colors)
 STYLES = ["plain", "accent", "good", "err", "muted", "rune", "head", "warn"]
 SPIN = art.TENTACLE
+
+COMMANDS = ["/yolo", "/readonly", "/steps", "/think", "/web", "/verbose",
+            "/undo", "/resume", "/sessions", "/load", "/clear", "/help", "/quit"]
 
 
 class Bridge:
@@ -183,6 +188,7 @@ class TuiApp:
         self.spin_i = 0
         self.pending_images = []    # PNG bytes attached to the next message
         self._resume_data = None    # set by launch() if --continue/--resume
+        self._session_list = []     # last /sessions listing, for /load <#>
         # confirmation handshake
         self._pending = None       # (tool, args) awaiting y/n
         self._confirm_event = threading.Event()
@@ -318,25 +324,58 @@ class TuiApp:
 
     def _greet(self):
         for ln in art.banner().splitlines():
-            # strip ANSI; curses can't render it. Color the whole line as head.
-            import re
             clean = re.sub(r"\033\[[0-9;]*m", "", ln)
             self.add([(clean, "head")])
         self.add([("", "plain")])
         self.add([("the dreamer waits. speak your task.  /help for rites · "
                    "Ctrl-V paste screenshot · Esc cancel · Ctrl-Q quit", "muted")])
-        self.add([("", "plain")])
         if self._resume_data:
-            n = self.sess.resume(self._resume_data)
-            self.add([(f"↺ resumed session {self._resume_data.get('id')} "
-                       f"({n} messages restored)", "rune")])
-            # replay the gist so the user sees context
-            for m in self._resume_data.get("messages", [])[-6:]:
-                role = m.get("role")
-                txt = self.sess._text_of(m)
-                if role == "user" and not txt.startswith("<obs>"):
-                    self.add([("ᛝ ", "accent"), (txt[:120], "plain")])
             self.add([("", "plain")])
+            self._load_session(self._resume_data)
+        else:
+            n = len(self.sess.store.list_sessions())
+            if n:
+                self.add([(f"  {n} saved session(s) — /sessions to list, "
+                           f"/resume to continue the latest", "muted")])
+        self.add([("", "plain")])
+
+    # ---- session replay ---------------------------------------------------
+    def _replay(self, messages):
+        """Render a saved session's transcript so you can SEE it, not just a count."""
+        from .loop import _summ
+        shown = 0
+        for m in messages:
+            role = m.get("role")
+            txt = self.sess._text_of(m)
+            if role == "system" or (role == "user" and txt.startswith("<obs>")):
+                continue
+            if role == "user":
+                self.add([("ᛝ ", "accent"), (txt.strip()[:300], "plain")])
+                shown += 1
+            elif role == "assistant":
+                if "<tool>" in txt or "<tool_call>" in txt:
+                    from . import parser as P
+                    call, _ = P.parse_tool_call(txt)
+                    if call:
+                        name = call.get("name", "?")
+                        args = {k: v for k, v in call.items() if k != "name"}
+                        self.add([("◆ ", "muted"), (name, "accent"),
+                                  ("  " + _summ(args), "muted")])
+                else:
+                    for row in render_markdown(txt.strip()):
+                        self.add(row or [("", "plain")])
+                    shown += 1
+        return shown
+
+    def _load_session(self, data):
+        self.sess.resume(data)
+        sid = data.get("id", "?")
+        self.add([(f"↺ session {sid}", "rune"),
+                  (f"  ·  {data.get('meta', {}).get('title', '')}", "muted")])
+        self.add([("┄" * 8, "muted")])
+        self._replay(data.get("messages", []))
+        self.add([("┄" * 8 + " (resumed — keep going)", "muted")])
+        self.scroll = 0
 
     # ---- input handling ---------------------------------------------------
     def _handle(self, ch, burst=False):
@@ -362,8 +401,8 @@ class TuiApp:
                 self.input = ""
             elif ch == "\x16":            # Ctrl-V paste screenshot
                 self._paste_image()
-            elif ch == "\t":              # tabs → spaces (pasted code)
-                self.input += "    "
+            elif ch == "\t":              # Tab: complete /commands, else indent
+                self._complete()
             elif ch.isprintable():
                 if self._pending:
                     self._answer_confirm(ch)
@@ -392,6 +431,19 @@ class TuiApp:
             self._confirm_result = False
             self._confirm_event.set()
 
+    def _complete(self):
+        """Tab: autocomplete a /command; otherwise insert an indent."""
+        cur = self.input
+        if cur.startswith("/") and " " not in cur:
+            matches = [c for c in COMMANDS if c.startswith(cur)]
+            if len(matches) == 1:
+                self.input = matches[0] + " "
+            elif len(matches) > 1:
+                self.input = os.path.commonprefix(matches)
+                self.add([("  " + "  ".join(matches), "muted")])
+        else:
+            self.input += "    "
+
     def _paste_image(self):
         img = clipboard.grab_image()
         if img:
@@ -419,25 +471,38 @@ class TuiApp:
         elif cmd == "/undo":
             self.add([(self.sess.undo(), "warn")])
         elif cmd == "/resume":
-            if not self.working:
-                self._submit("continue.")
+            data = self.sess.store.latest_session()
+            if data:
+                self._load_session(data)
+            else:
+                self.add([("no previous session to resume.", "muted")])
         elif cmd == "/clear":
             with self.lock:
                 self.entries.clear()
             self.scroll = 0
         elif cmd == "/sessions":
-            rows = self.sess.store.list_sessions()
-            if not rows:
+            self._session_list = self.sess.store.list_sessions()
+            if not self._session_list:
                 self.add([("no saved sessions yet.", "muted")])
-            for r in rows:
-                self.add([(f"  {r['id']}", "accent"), (f"  {r['title']}", "muted")])
-        elif cmd == "/load":
-            data = self.sess.store.load_session(arg) if arg else None
-            if not data:
-                self.add([(f"no session '{arg}' (see /sessions)", "err")])
             else:
-                n = self.sess.resume(data)
-                self.add([(f"↺ loaded {arg} ({n} messages)", "rune")])
+                self.add([("saved sessions — /load <#> or <id>:", "muted")])
+                import datetime
+                for i, r in enumerate(self._session_list, 1):
+                    when = datetime.datetime.fromtimestamp(
+                        r["updated"]).strftime("%m-%d %H:%M")
+                    self.add([(f"  {i}. ", "accent"), (r["id"], "rune"),
+                              (f"  {when}  ", "muted"),
+                              (r["title"][:50], "plain")])
+        elif cmd == "/load":
+            data = None
+            if arg.isdigit() and 1 <= int(arg) <= len(self._session_list):
+                data = self.sess.store.load_session(self._session_list[int(arg) - 1]["id"])
+            elif arg:
+                data = self.sess.store.load_session(arg)
+            if not data:
+                self.add([(f"no session '{arg}' — try /sessions first", "err")])
+            else:
+                self._load_session(data)
         elif cmd == "/yolo":
             self.cfg.allow_writes = not self.cfg.allow_writes
             self.sess.messages[0]["content"] = self.sess._system()
@@ -558,6 +623,13 @@ class TuiApp:
             cursor_col = min(w - 1, sum(len(t) for t, _ in input_rows[-1]))
             if self.pending_images:
                 input_rows[-1] = input_rows[-1] + [(f"  📎{len(self.pending_images)}", "rune")]
+            # live command hint while typing a /command (Tab to complete)
+            if self.input.startswith("/") and " " not in self.input:
+                matches = [c for c in COMMANDS if c.startswith(self.input)]
+                if matches and matches != [self.input]:
+                    hint = "  ⇥ " + "  ".join(matches[:8])
+                    input_rows = [[(hint, "muted")]] + input_rows
+                    cursor_col = min(w - 1, sum(len(t) for t, _ in input_rows[-1]))
         n_in = len(input_rows)
         input_top = max(top, foot_row - n_in)
         body_h = max(1, input_top - 1 - top)
