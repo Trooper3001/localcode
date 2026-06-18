@@ -31,6 +31,21 @@ Or run without installing, straight from the repo:
 python3 -m localcode
 ```
 
+### Windows
+
+localcode runs on Windows, but it drives **bash** (the model is trained on it),
+so install **[Git for Windows](https://git-scm.com/download/win)** (gives Git
+Bash) or use **WSL**. localcode auto-detects `bash` on PATH, then Git Bash, then
+`$LOCALCODE_BASH` if you set it. Notes:
+
+- The full-screen TUI needs `windows-curses` (installed automatically via
+  `pip install`). If it's missing, localcode falls back to the plain REPL
+  (`--plain`) automatically.
+- It detects `python`/`python3` automatically for running code and tests.
+- Clipboard screenshot paste uses PowerShell.
+- Best experience: **Windows Terminal** (truecolor) + a Nerd Font, or just run
+  everything inside **WSL** for a native-Linux experience.
+
 ## First-time setup
 
 ```bash

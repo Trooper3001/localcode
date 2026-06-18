@@ -33,6 +33,25 @@ def grab_image() -> bytes | None:
         img = _run(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"])
         if img:
             return img
+    # Windows — via PowerShell + System.Windows.Forms clipboard
+    if sys.platform == "win32":
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False).name
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
+            "$i=[System.Windows.Forms.Clipboard]::GetImage(); "
+            f"if($i){{$i.Save('{tmp}',[System.Drawing.Imaging.ImageFormat]::Png)}}"
+        )
+        try:
+            subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
+                           capture_output=True, timeout=10)
+            with open(tmp, "rb") as fh:
+                data = fh.read()
+            os.unlink(tmp)
+            if data[:4] == b"\x89PNG":
+                return data
+        except Exception:
+            pass
+
     # macOS
     if sys.platform == "darwin":
         if shutil.which("pngpaste"):
@@ -59,6 +78,8 @@ def available() -> str:
     for tool in ("wl-paste", "xclip", "pngpaste"):
         if shutil.which(tool):
             return tool
+    if sys.platform == "win32" and shutil.which("powershell"):
+        return "powershell"
     if sys.platform == "darwin":
         return "osascript"
     return ""

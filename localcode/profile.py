@@ -37,7 +37,8 @@ def _iter_files(ws: pathlib.Path):
 
 def detect_test_cmd(ws: pathlib.Path) -> str:
     if any(ws.rglob("test_*.py")) or any(ws.rglob("*_test.py")) or (ws / "tests").is_dir():
-        return "python3 -m pytest -q"
+        from .tools import PY_EXE
+        return f"{PY_EXE} -m pytest -q"
     pkg = ws / "package.json"
     if pkg.exists() and '"test"' in pkg.read_text(errors="ignore"):
         return "npm test"

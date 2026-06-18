@@ -504,7 +504,7 @@ class Session:
         has_pytests = any(ws.rglob("test_*.py")) or any(ws.rglob("*_test.py")) \
             or (ws / "tests").is_dir()
         if has_pytests and (shutil.which("pytest") or _module_available("pytest")):
-            return "python3 -m pytest -q"
+            return f"{toolmod.PY_EXE} -m pytest -q"
         return None
 
     def _test_gate(self, attempts):
@@ -518,8 +518,7 @@ class Session:
         if not cmd:
             return None
         try:
-            proc = subprocess.run(cmd, cwd=self.cfg.workspace, shell=True,
-                                   capture_output=True, text=True, timeout=120)
+            proc = toolmod.run_shell(self.cfg.workspace, cmd, 120)
         except Exception as e:
             return None  # can't run tests → don't block on it
         out = ((proc.stdout or "") + (proc.stderr or "")).strip()

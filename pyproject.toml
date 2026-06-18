@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "localcode"
-version = "0.1.0"
+version = "0.1.1"
 description = "A terminal coding agent tailored to Qwen3.6, with a Cthulhu-themed TUI. Runs on OpenRouter or local quantized GGUF."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,9 +18,11 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Software Development",
 ]
-# Pure standard library — no runtime dependencies. tomllib is stdlib on 3.11+;
-# on 3.10 config-file reading is skipped gracefully.
-dependencies = []
+# Pure standard library on Linux/macOS. On Windows the curses-based TUI needs
+# windows-curses; without it, the plain REPL (--plain) is used automatically.
+dependencies = [
+    "windows-curses; sys_platform == 'win32'",
+]
 
 [project.optional-dependencies]
 # nice-to-haves; the agent works without them

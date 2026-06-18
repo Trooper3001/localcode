@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import py_compile
 import pathlib
 import subprocess
@@ -269,12 +270,43 @@ def _replace_function(ctx, args):
 # exec tools
 # --------------------------------------------------------------------------- #
 
+def _bash_path() -> str | None:
+    """Find a bash to run commands through — same on every OS (the model is
+    trained on bash). On Windows this picks up Git Bash / WSL."""
+    override = os.environ.get("LOCALCODE_BASH")
+    if override and os.path.exists(override):
+        return override
+    b = shutil.which("bash")
+    if b:
+        return b
+    if sys.platform == "win32":
+        for p in (r"C:\Program Files\Git\bin\bash.exe",
+                  r"C:\Program Files\Git\usr\bin\bash.exe",
+                  os.path.expanduser(r"~\AppData\Local\Programs\Git\bin\bash.exe")):
+            if os.path.exists(p):
+                return p
+    return None
+
+
+# the Python interpreter to invoke (Windows often has 'python', not 'python3')
+PY_EXE = shutil.which("python3") or shutil.which("python") or "python3"
+
+
+def run_shell(cwd, cmd, timeout):
+    """Run a shell command through bash on every platform (Git Bash on Windows),
+    falling back to the OS default shell if no bash is found."""
+    kw = dict(cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+    if sys.platform != "win32":
+        kw["start_new_session"] = True   # POSIX-only; lets us group-kill later
+    bash = _bash_path()
+    if bash:
+        return subprocess.run([bash, "-c", cmd], **kw)
+    return subprocess.run(cmd, shell=True, **kw)
+
+
 def _run(ctx, cmd, timeout, shell=True):
     try:
-        proc = subprocess.run(
-            cmd, cwd=ctx.workspace, capture_output=True, text=True,
-            timeout=timeout, shell=shell, start_new_session=True,
-        )
+        proc = run_shell(ctx.workspace, cmd, timeout)
     except subprocess.TimeoutExpired:
         return f"TIMEOUT after {timeout}s"
     out = (proc.stdout or "") + (proc.stderr or "")
@@ -294,7 +326,7 @@ def _run_command(ctx, args):
 
 
 _LANG_RUN = {
-    ".py": "python3", ".js": "node", ".sh": "bash", ".rb": "ruby", ".go": "go run",
+    ".py": PY_EXE, ".js": "node", ".sh": "bash", ".rb": "ruby", ".go": "go run",
 }
 
 
