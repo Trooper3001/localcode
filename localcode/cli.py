@@ -133,7 +133,7 @@ def main(argv=None):
     import sys as _sys
     raw = argv if argv is not None else _sys.argv[1:]
     if raw and raw[0] in ("setup", "config", "init"):
-        from .setup import run_setup
+        from .wizard import run_setup
         return run_setup()
 
     args = build_parser().parse_args(argv)

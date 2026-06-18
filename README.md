@@ -211,7 +211,7 @@ localcode/
   profile.py   auto-detected project PROFILE
   art.py       Cthulhu banner + spinner + deep-purple palette
   tui.py       full-screen curses TUI (transcript, commands, image paste)
-  setup.py     `localcode setup` first-run wizard
+  wizard.py    `localcode setup` first-run wizard
   clipboard.py screenshot paste for vision
   cli.py       one-shot + interactive (TUI / plain REPL)
 ```
