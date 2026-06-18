@@ -25,22 +25,24 @@ def rgb(r, g, b, s):
     return f"\033[38;2;{r};{g};{b}m{s}\033[0m"
 
 
-# eldritch gradient stops (arcane glow → deep void purple)
+# eldritch gradient stops (arcane glow → deep violet) — kept bright enough to
+# stay legible on a black terminal (no near-black stops)
 ABYSS = [
-    (201, 170, 255),  # pale arcane glow
-    (167, 122, 255),  # bright violet
-    (139, 92, 246),   # amethyst
-    (109, 56, 214),   # royal void
-    (79, 30, 158),    # deep purple
-    (49, 12, 92),     # abyssal violet
+    (208, 178, 255),  # pale arcane glow
+    (182, 138, 255),  # bright violet
+    (158, 110, 246),  # amethyst
+    (140, 92, 224),   # royal void
+    (124, 80, 205),   # deep violet
+    (112, 72, 190),   # abyssal violet
 ]
 
-ACCENT = (167, 122, 255)   # bright violet — primary
-MUTED = (104, 92, 128)     # dim mauve-slate
-WARN = (224, 180, 72)      # amber
-ERR = (224, 86, 132)       # blood-rose
+ACCENT = (180, 140, 255)   # bright violet — primary
+MUTED = (165, 158, 188)    # readable light mauve-grey (was too dark)
+WARN = (240, 198, 92)      # amber
+ERR = (246, 118, 158)      # blood-rose
 RUNE = (201, 170, 255)     # arcane glow
-GOOD = (149, 213, 178)     # faint phosphor (success only)
+GOOD = (124, 232, 160)     # phosphor green (diffs/success) — brighter
+PLAIN = (228, 228, 240)    # near-white body text
 
 
 def c(color, s):

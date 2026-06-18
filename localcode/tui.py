@@ -185,9 +185,9 @@ class TuiApp:
             "err": (art.ERR, curses.COLOR_RED),
             "muted": (art.MUTED, curses.COLOR_WHITE),
             "rune": (art.RUNE, curses.COLOR_MAGENTA),
-            "head": (art.ABYSS[1], curses.COLOR_MAGENTA),
+            "head": (art.RUNE, curses.COLOR_MAGENTA),
             "warn": (art.WARN, curses.COLOR_YELLOW),
-            "plain": ((220, 220, 230), curses.COLOR_WHITE),
+            "plain": (art.PLAIN, curses.COLOR_WHITE),
         }
         self.pair = {}
         idx = 16
@@ -204,8 +204,8 @@ class TuiApp:
                     fg = fallback
             curses.init_pair(i, fg, bg)
             self.pair[name] = curses.color_pair(i)
-            if name == "muted":
-                self.pair[name] |= curses.A_DIM
+        # only the header gets bold; nothing gets A_DIM (it caused black-on-black)
+        self.pair["head"] |= curses.A_BOLD
 
     def _main(self, stdscr):
         self.stdscr = stdscr
