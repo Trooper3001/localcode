@@ -79,10 +79,11 @@ class Bridge:
             self.app.add([(para, "plain")])
         self.app.add([("", "plain")])
 
-    def diff(self, path, old, new):
-        for line in difflib.unified_diff(
-                (old or "").splitlines(), (new or "").splitlines(),
-                fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""):
+    def diff(self, path, old, new, max_lines=14):
+        d = list(difflib.unified_diff(
+            (old or "").splitlines(), (new or "").splitlines(),
+            fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""))
+        for line in d[:max_lines]:
             if line.startswith("+") and not line.startswith("+++"):
                 st = "good"
             elif line.startswith("-") and not line.startswith("---"):
@@ -92,6 +93,8 @@ class Bridge:
             else:
                 st = "muted"
             self.app.add([(line, st)])
+        if len(d) > max_lines:
+            self.app.add([(f"  … (+{len(d) - max_lines} more diff lines)", "muted")])
 
     def set_busy(self, busy):
         self.app.busy = busy

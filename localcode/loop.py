@@ -55,13 +55,14 @@ class UI:
     def final(self, text):
         print("\n" + text.strip() + "\n")
 
-    def diff(self, path, old, new):
+    def diff(self, path, old, new, max_lines=14):
         if self.verbosity == "quiet":
             return
-        d = difflib.unified_diff(
+        d = list(difflib.unified_diff(
             (old or "").splitlines(), (new or "").splitlines(),
-            fromfile=f"a/{path}", tofile=f"b/{path}", lineterm="")
-        for line in d:
+            fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""))
+        shown = d[:max_lines]
+        for line in shown:
             if line.startswith("+") and not line.startswith("+++"):
                 print(art.c(art.GOOD, line))
             elif line.startswith("-") and not line.startswith("---"):
@@ -70,6 +71,8 @@ class UI:
                 print(art.c(art.RUNE, line))
             else:
                 print(art.dim(line))
+        if len(d) > max_lines:
+            print(art.dim(f"  … (+{len(d) - max_lines} more diff lines)"))
 
 
 # --------------------------------------------------------------------------- #
@@ -246,8 +249,10 @@ class Session:
         except Exception as e:
             return f"error: {type(e).__name__}: {e}"
 
-        # show the diff for edits (SPEC §11A: diffs always)
-        if tool.mutates and path:
+        # Show a diff for surgical EDITS (the point is the small delta). For
+        # write_file (whole-file create/overwrite) the diff is the entire file —
+        # noise — so we skip it; the result line already says "wrote X (N lines)".
+        if tool.mutates and path and name != "write_file":
             p = self.ctx.workspace / path
             after = p.read_text(errors="ignore") if p.exists() else ""
             self.ui.diff(toolmod._rel(self.ctx, p.resolve()), before, after)
@@ -302,7 +307,7 @@ class Session:
                     out = self.backend.generate(
                         self.messages,
                         stop=["</tool>", "</tool_call>"],
-                        max_tokens=2048,
+                        max_tokens=4096,
                         temperature=self.cfg.temperature,
                         think=think_step,
                         on_token=(self._stream if verbose else None),
@@ -315,6 +320,8 @@ class Session:
                     self._set_busy(False)
                 if self.cancel_event.is_set():
                     return self._on_cancel()
+                # did the model run out of output tokens (often: reasoned too long)?
+                truncated = getattr(self.backend, "last_finish_reason", None) == "length"
                 # Empty reply (e.g. reasoning consumed the whole token budget) is
                 # NOT a finished answer — re-prompt with think off so the model has
                 # room to actually produce output. Guard against infinite spinning.
@@ -323,13 +330,27 @@ class Session:
                     if empty_strikes >= 3:
                         self.ui.info("model kept returning empty output — stopping.")
                         return None
-                    self.ui.tool("(empty)", "", "no output — retrying", ok=False)
+                    why = ("you spent the whole token budget reasoning and got cut "
+                           "off — think in ONE short sentence, then act"
+                           if truncated else "you returned no output")
+                    self.ui.tool("(cut off)" if truncated else "(empty)", "",
+                                 "retrying with brief reasoning", ok=False)
                     self.messages.append({"role": "user", "content":
-                        "<obs>You returned no output. Respond with ONE tool call "
-                        "now, or a brief final answer. Keep reasoning short.</obs>"})
+                        f"<obs>{why}. Respond now with ONE tool call or a brief "
+                        f"final answer.</obs>"})
                     force_no_think = True
                     continue
                 empty_strikes = 0
+
+                # A truncated reply with no tool call isn't a finished answer either.
+                if truncated and not parser.has_tool_call(out):
+                    self.ui.tool("(cut off)", "", "answer truncated — continuing", ok=False)
+                    self.messages.append({"role": "assistant", "content": out})
+                    self.messages.append({"role": "user", "content":
+                        "<obs>Your answer was cut off at the token limit. Continue "
+                        "from where you stopped, briefly.</obs>"})
+                    force_no_think = True
+                    continue
 
                 if not parser.has_tool_call(out):
                     # Candidate final answer. If the run changed code, don't accept
@@ -376,6 +397,12 @@ class Session:
                     # keeps token cost stable regardless of dialect the model used)
                     assistant_text = _render_call(call)
 
+                    if truncated:
+                        obs += ("\n[truncated] Your output hit the token limit, so "
+                                "the content above may be incomplete. For large "
+                                "files, write a first chunk then append_file the "
+                                "rest, and keep reasoning to one short line.")
+                        last_error = True
                     # stuck detection: same call repeated, or repeated errors
                     sig = json.dumps(call, sort_keys=True)
                     recent.append((sig, ok))

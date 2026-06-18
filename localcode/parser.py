@@ -106,15 +106,23 @@ _TEXT_KEYS = ("text", "content", "new_text", "code", "value", "body")
 
 
 def _extract_content_block(body: str, json_str: str | None) -> str | None:
-    """Pull a file body from a <text>…</text> block, or a fenced block that
-    appears after the JSON object."""
-    m = _TEXT_RE.search(body)
-    if m:
+    """Pull a file body from the model's output, tolerating every common shape:
+    a <text> block (even one truncated with no closing tag), a fenced block, or
+    just the raw remainder after the JSON object. This is what stops spurious
+    'missing text' errors when the model places content slightly off-spec."""
+    # 1) <text>…</text>, or <text>… (unclosed — happens when output is truncated)
+    m = re.search(r"<text>\n?(.*?)(?:\n?</text>|$)", body, re.DOTALL)
+    if m and m.group(1).strip():
         return m.group(1)
     rest = body.split(json_str, 1)[1] if (json_str and json_str in body) else body
+    # 2) fenced ```code``` block
     m = _CONTENT_FENCE.search(rest)
     if m:
         return m.group(1)
+    # 3) last resort: raw remainder after the JSON object, minus any stray tags
+    tail = re.sub(r"</?(?:tool|tool_call|text)>", "", rest).strip()
+    if tail:
+        return tail
     return None
 
 

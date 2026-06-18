@@ -32,6 +32,7 @@ class LLMBackend:
         self._abort = threading.Event()
         self._resp = None      # current open HTTP response (for hard abort)
         self._lock = threading.Lock()
+        self.last_finish_reason = None   # "stop" | "length" (truncated) | ...
 
     def generate(self, messages, *, stop=None, max_tokens=1024,
                  temperature=0.3, think=True, on_token=None) -> str:
@@ -105,6 +106,7 @@ class OpenRouterBackend(LLMBackend):
             raise BackendError(f"OpenRouter unreachable: {e}")
 
         self._begin(resp)
+        self.last_finish_reason = None
         chunks = []
         try:
             for raw in resp:
@@ -120,8 +122,10 @@ class OpenRouterBackend(LLMBackend):
                     obj = json.loads(data)
                 except json.JSONDecodeError:
                     continue
-                delta = obj.get("choices", [{}])[0].get("delta", {})
-                tok = delta.get("content")
+                choice = obj.get("choices", [{}])[0]
+                if choice.get("finish_reason"):
+                    self.last_finish_reason = choice["finish_reason"]
+                tok = choice.get("delta", {}).get("content")
                 if tok:
                     chunks.append(tok)
                     if on_token:
