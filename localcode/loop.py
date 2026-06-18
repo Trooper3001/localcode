@@ -286,6 +286,7 @@ class Session:
         gate_attempts = 0   # how many times the test-gate has bounced a "done"
         force_no_think = False  # next step: think off (e.g. after an empty reply)
         empty_strikes = 0   # consecutive empty replies, to avoid spinning forever
+        overflow_retried = False  # emergency context-compaction used once
         try:
             while steps < self.cfg.max_steps:
                 if self.cancel_event.is_set():
@@ -314,6 +315,18 @@ class Session:
                     )
                 except backendmod.Aborted:
                     return self._on_cancel()
+                except backendmod.BackendError as e:
+                    msg = str(e).lower()
+                    overflow = any(w in msg for w in
+                                   ("context", "maximum", "too long", "token"))
+                    if overflow and not overflow_retried:
+                        overflow_retried = True
+                        self._trim_context(aggressive=True)
+                        self.ui.info("context limit hit — compacted history, retrying.")
+                        steps -= 1
+                        continue
+                    self.ui.info(f"backend error: {e}")
+                    return None
                 finally:
                     if spin:
                         spin.stop()
@@ -442,14 +455,15 @@ class Session:
     def est_tokens(messages) -> int:
         return sum(len(Session._text_of(m)) for m in messages) // 4
 
-    def _trim_context(self):
+    def _trim_context(self, aggressive=False):
         """Keep system + original task + the recent turns in full; collapse the
         middle into a one-line-per-step digest when we exceed the live budget.
-        This is what lets long agentic loops run without the prompt ballooning."""
-        budget = int(self.cfg.ctx_len * 0.6)
-        if self.est_tokens(self.messages) <= budget:
+        This is what lets long agentic loops run without the prompt ballooning.
+        `aggressive` is the emergency mode used if the model reports overflow."""
+        budget = int(self.cfg.ctx_len * (0.3 if aggressive else 0.6))
+        if not aggressive and self.est_tokens(self.messages) <= budget:
             return
-        keep_tail = 8                       # last ~4 turns verbatim
+        keep_tail = 4 if aggressive else 8  # recent turns kept verbatim
         if len(self.messages) <= 2 + keep_tail:
             return
         head, tail = self.messages[:2], self.messages[-keep_tail:]
