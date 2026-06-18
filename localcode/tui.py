@@ -19,11 +19,73 @@ from __future__ import annotations
 
 import curses
 import threading
+import re
 import difflib
 import textwrap
 
 from . import art, tools as toolmod, clipboard
 from .loop import Session, build_repomap
+
+
+# --------------------------------------------------------------------------- #
+# lightweight markdown → styled rows (the model's answers are markdown)
+# --------------------------------------------------------------------------- #
+
+_INLINE = re.compile(r"(\*\*.+?\*\*|__.+?__|`[^`]+`|\*[^*\s][^*]*\*)")
+
+
+def _inline_md(text, base="plain"):
+    segs, pos = [], 0
+    for m in _INLINE.finditer(text):
+        if m.start() > pos:
+            segs.append((text[pos:m.start()], base))
+        tok = m.group(0)
+        if tok[:2] in ("**", "__"):
+            segs.append((tok[2:-2], "bold"))
+        elif tok[0] == "`":
+            segs.append((tok[1:-1], "code"))
+        else:  # *emphasis* — terminals lack reliable italics, use bold
+            segs.append((tok[1:-1], "bold"))
+        pos = m.end()
+    if pos < len(text):
+        segs.append((text[pos:], base))
+    return segs or [(text, base)]
+
+
+def render_markdown(text):
+    """Return a list of styled rows (each a list of (text, style) segments)."""
+    rows, in_code = [], False
+    for line in (text or "").splitlines():
+        st = line.strip()
+        if st.startswith("```"):
+            in_code = not in_code
+            lang = st[3:].strip()
+            rows.append([("┄┄ " + lang if lang else "┄┄", "muted")])
+            continue
+        if in_code:
+            rows.append([("│ ", "muted"), (line, "code")])
+            continue
+        m = re.match(r"^(#{1,6})\s+(.*)", line)
+        if m:
+            rows.append([("", "plain")])
+            rows.append([(m.group(2), "h")])
+            continue
+        m = re.match(r"^(\s*)[-*+]\s+(.*)", line)
+        if m:
+            rows.append([(m.group(1) + "• ", "accent")] + _inline_md(m.group(2)))
+            continue
+        m = re.match(r"^(\s*\d+\.)\s+(.*)", line)
+        if m:
+            rows.append([(m.group(1) + " ", "accent")] + _inline_md(m.group(2)))
+            continue
+        if st.startswith(">"):
+            rows.append([("▏ ", "rune")] + _inline_md(st.lstrip(">").strip(), "muted"))
+            continue
+        if not st:
+            rows.append([])
+            continue
+        rows.append(_inline_md(line))
+    return rows
 
 
 HELP = [
@@ -39,7 +101,7 @@ HELP = [
     "  /sessions        list saved sessions  ·  /load ID  to resume one",
     "  /clear           clear the transcript",
     "  /help · /quit",
-    "keys: Enter=send · Ctrl-V=paste screenshot · Esc=cancel · Ctrl-Q=quit · PgUp/PgDn=scroll",
+    "keys: Enter=send · paste multi-line text directly · Ctrl-V=paste image · Esc=cancel · Ctrl-Q=quit",
 ]
 
 
@@ -59,7 +121,6 @@ class Bridge:
     def thought(self, text):
         line = (text or "").strip().splitlines()
         line = line[0][:200] if line else ""
-        import re
         if len(re.sub(r"[^A-Za-z0-9]", "", line)) < 4:
             return
         self.app.add([("  ≀ " + line, "muted")])
@@ -75,8 +136,8 @@ class Bridge:
 
     def final(self, text):
         self.app.add([("", "plain")])
-        for para in (text or "").strip().splitlines():
-            self.app.add([(para, "plain")])
+        for row in render_markdown((text or "").strip()):
+            self.app.add(row or [("", "plain")])
         self.app.add([("", "plain")])
 
     def diff(self, path, old, new, max_lines=14):
@@ -209,25 +270,51 @@ class TuiApp:
             self.pair[name] = curses.color_pair(i)
         # only the header gets bold; nothing gets A_DIM (it caused black-on-black)
         self.pair["head"] |= curses.A_BOLD
+        # derived markdown styles
+        self.pair["bold"] = self.pair["plain"] | curses.A_BOLD
+        self.pair["h"] = self.pair["accent"] | curses.A_BOLD
+        self.pair["code"] = self.pair["good"]
 
     def _main(self, stdscr):
         self.stdscr = stdscr
         curses.curs_set(1)
-        stdscr.nodelay(True)
+        stdscr.keypad(True)
         stdscr.timeout(80)
         self._init_colors()
         self._greet()
         while self.running:
             self._draw()
-            try:
-                ch = stdscr.get_wch()
-            except curses.error:
-                ch = None  # timeout tick (drives the spinner)
-            if ch is not None:
-                self._handle(ch)
+            keys = self._read_burst()
+            # a multi-key burst is a paste: newlines become literal input, not a
+            # submit. a lone Enter still sends.
+            burst = len(keys) > 1
+            for ch in keys:
+                self._handle(ch, burst=burst)
             if self.busy or self.working:
                 self.spin_i += 1
                 self.dirty = True
+
+    def _read_burst(self):
+        """Read one key (80ms wait), then drain everything else available now.
+        A paste arrives as one big burst; typing arrives one key per tick."""
+        keys = []
+        try:
+            ch = self.stdscr.get_wch()
+        except curses.error:
+            return keys
+        keys.append(ch)
+        self.stdscr.nodelay(True)
+        try:
+            while True:
+                try:
+                    c = self.stdscr.get_wch()
+                except curses.error:
+                    break
+                keys.append(c)
+        finally:
+            self.stdscr.nodelay(False)
+            self.stdscr.timeout(80)
+        return keys
 
     def _greet(self):
         for ln in art.banner().splitlines():
@@ -252,7 +339,7 @@ class TuiApp:
             self.add([("", "plain")])
 
     # ---- input handling ---------------------------------------------------
-    def _handle(self, ch):
+    def _handle(self, ch, burst=False):
         if isinstance(ch, str):
             if ch == "\x11":              # Ctrl-Q
                 self.running = False
@@ -263,13 +350,20 @@ class TuiApp:
                 elif self.working:
                     self.sess.cancel()
             elif ch in ("\n", "\r"):
-                self._on_enter()
+                # a newline inside a paste is literal multi-line input; a lone
+                # Enter submits
+                if burst and not self._pending:
+                    self.input += "\n"
+                else:
+                    self._on_enter()
             elif ch in ("\x7f", "\b"):    # backspace
                 self.input = self.input[:-1]
             elif ch == "\x15":            # Ctrl-U clear line
                 self.input = ""
             elif ch == "\x16":            # Ctrl-V paste screenshot
                 self._paste_image()
+            elif ch == "\t":              # tabs → spaces (pasted code)
+                self.input += "    "
             elif ch.isprintable():
                 if self._pending:
                     self._answer_confirm(ch)
@@ -422,6 +516,20 @@ class TuiApp:
                 pos += len(wline)
         return out
 
+    def _input_rows(self, w, maxrows=6):
+        """Wrap the (possibly multi-line) input buffer into styled rows."""
+        prompt = "ᛝ "
+        rows = []
+        for li, line in enumerate(self.input.split("\n")):
+            base_pfx = prompt if li == 0 else "  "
+            avail = max(4, w - 1 - len(base_pfx))
+            chunks = textwrap.wrap(line, avail, drop_whitespace=False) or [""]
+            for ci, chunk in enumerate(chunks):
+                pfx = base_pfx if ci == 0 else "  "
+                style = "accent" if (li == 0 and ci == 0) else "muted"
+                rows.append([(pfx, style), (chunk, "plain")])
+        return rows[-maxrows:] if rows else [[(prompt, "accent"), ("", "plain")]]
+
     def _draw(self):
         if not self.dirty:
             return
@@ -431,21 +539,33 @@ class TuiApp:
         s.erase()
 
         # header
-        title = " ᛝ localcode "
-        sub = f" {self.cfg.backend} · {self.cfg.model} "
-        self._put(0, 0, [(title, "head"), ("· " + str(self.cfg.workspace), "muted")], w)
+        self._put(0, 0, [(" ᛝ localcode ", "head"),
+                         ("· " + str(self.cfg.workspace), "muted")], w)
         s.hline(1, 0, curses.ACS_HLINE, w)
 
         top = 2
-        input_row = h - 2
         foot_row = h - 1
-        body_h = input_row - 1 - top
-        s.hline(input_row - 1, 0, curses.ACS_HLINE, w)
+
+        # input area (grows with multi-line / pasted input)
+        cursor_col = 2
+        if self._pending:
+            tool, _ = self._pending
+            kind = "run" if tool.exec else "apply edit"
+            input_rows = [[(f"  {kind} with ", "warn"), (tool.name, "accent"),
+                           ("?  [y/n]  (Esc=no)", "warn")]]
+        else:
+            input_rows = self._input_rows(w)
+            cursor_col = min(w - 1, sum(len(t) for t, _ in input_rows[-1]))
+            if self.pending_images:
+                input_rows[-1] = input_rows[-1] + [(f"  📎{len(self.pending_images)}", "rune")]
+        n_in = len(input_rows)
+        input_top = max(top, foot_row - n_in)
+        body_h = max(1, input_top - 1 - top)
+        s.hline(input_top - 1, 0, curses.ACS_HLINE, w)
 
         # transcript
         lines = self._wrap(w - 1)
-        total = len(lines)
-        end = total - self.scroll
+        end = len(lines) - self.scroll
         start = max(0, end - body_h)
         view = lines[start:end]
         y = top + max(0, body_h - len(view))
@@ -453,19 +573,9 @@ class TuiApp:
             self._put(y, 0, row or [("", "plain")], w)
             y += 1
 
-        # input line
-        prompt = "ᛝ "
-        if self._pending:
-            tool, _ = self._pending
-            kind = "run" if tool.exec else "apply edit"
-            self._put(input_row, 0,
-                      [(f"  {kind} with ", "warn"), (tool.name, "accent"),
-                       ("?  [y/n]  (Esc=no)", "warn")], w)
-        else:
-            segs = [(prompt, "accent"), (self.input, "plain")]
-            if self.pending_images:
-                segs.append((f"  📎{len(self.pending_images)}", "rune"))
-            self._put(input_row, 0, segs, w)
+        # input rows
+        for i, row in enumerate(input_rows):
+            self._put(input_top + i, 0, row, w)
 
         # footer / status
         if self.busy or self.working:
@@ -487,11 +597,10 @@ class TuiApp:
             status.append((f"  ↑{self.scroll}", "muted"))
         self._put(foot_row, 0, status, w)
 
-        # place cursor at end of input
+        # place cursor at the end of the last input row
         if not self._pending:
-            cx = min(w - 1, len("ᛝ ") + len(self.input))
             try:
-                s.move(input_row, cx)
+                s.move(input_top + n_in - 1, max(0, cursor_col))
             except curses.error:
                 pass
         s.refresh()
