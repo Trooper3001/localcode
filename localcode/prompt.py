@@ -47,6 +47,10 @@ def main():
   For replace_lines, the JSON carries start+end and the <text> block carries the \
 replacement lines. start/end are an INCLUSIVE range — make sure end covers the \
 LAST line of the block you mean to replace, or you'll leave orphaned lines.
+- To fix a reported bug or failing test, DIAGNOSE FIRST by running it \
+(run_command/run_file) — the error and its file:line tell you exactly where to \
+look in one step, which beats reading files speculatively. Then read only the \
+relevant lines and fix.
 - Keep reads narrow: read_file with start/end line windows, not whole files.
 - Edit surgically. Pick the right tool: to ADD new code use append_file (end of \
 file); to CHANGE existing code use replace_lines (its start..end lines are \
