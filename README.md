@@ -186,18 +186,39 @@ Same loop, same tools, same behavior — only the transport changes.
 
 ```
 localcode/
-  config.py    config + secret loading
-  backend.py   LLMBackend: OpenRouter (streaming) + KoboldCPP
-  prompt.py    Qwen3.6 chat-ml render + tool-protocol system block
-  parser.py    lenient <tool>{json}</tool> extraction
-  tools.py     registry + fs/edit/exec/docker/web tools (permission flags)
-  loop.py      the agent loop: gating, transparency, cancel, review, undo
-  cli.py       one-shot + interactive REPL
+  config.py    config + secret loading (env / .env / config.toml)
+  backend.py   LLMBackend: OpenRouter (streaming) + KoboldCPP, mid-request abort
+  prompt.py    Qwen3.6 chat-ml render + tool-protocol + persona/memory/profile
+  parser.py    lenient <tool> + <text> content-block extraction
+  tools.py     registry + fs/edit/exec/docker/web/remember tools (permissions)
+  loop.py      agent loop: gating, test-gate, trimming, cancel, review, undo
+  store.py     persistent memory + resumable sessions
+  profile.py   auto-detected project PROFILE
+  art.py       Cthulhu banner + spinner + deep-purple palette
+  tui.py       full-screen curses TUI (transcript, commands, image paste)
+  setup.py     `localcode setup` first-run wizard
+  clipboard.py screenshot paste for vision
+  cli.py       one-shot + interactive (TUI / plain REPL)
 ```
 
-## Not done yet (see SPEC §12 milestones)
+## Status (see SPEC §12 milestones)
 
-- M2: staged PLAN→ACT→VERIFY→DEBUG pipeline, hard test gate, stuck detection.
-- M3: budgeted context with summarize-and-evict (token economy at scale).
-- M4: persistent project profile + memory.
-- M6: validated parity + benchmarks on local GGUF.
+Done & tested against `qwen/qwen3.6-27b`:
+
+- **M2 — verification loop**: enforced **test-gate** (won't accept "done" while
+  the project's tests fail), **stuck detection**, real mid-request **cancel**,
+  syntax gate, empty/truncated-reply recovery. *(Uses adaptive ReAct rather than
+  a rigid staged PLAN→ACT→VERIFY→DEBUG pipeline — the gate gives the same
+  guarantee.)*
+- **M3 — context economy**: adaptive reasoning, **summarize-and-evict** trimming
+  with an emergency aggressive-compaction fallback, content-block tool protocol,
+  live token/step footer.
+- **M4 — project learning**: `memory.md` + `remember` tool, resumable sessions
+  (`--continue`/`--resume`), auto-generated `PROFILE.md`.
+
+Remaining:
+
+- **M6**: validated parity + latency/token benchmarks on a local GGUF
+  (KoboldCPP backend is implemented but unverified — needs the model running).
+- A true staged pipeline is optional; the ReAct loop + test-gate already meets
+  the verification goal.
