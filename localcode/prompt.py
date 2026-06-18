@@ -48,9 +48,11 @@ def main():
 replacement lines. start/end are an INCLUSIVE range — make sure end covers the \
 LAST line of the block you mean to replace, or you'll leave orphaned lines.
 - Keep reads narrow: read_file with start/end line windows, not whole files.
-- Edit surgically (replace_lines/replace_function/append_file). Use write_file \
-only for brand-new files. After writing a file you already know its contents — \
-don't re-read it to confirm.
+- Edit surgically. Pick the right tool: to ADD new code use append_file (end of \
+file); to CHANGE existing code use replace_lines (its start..end lines are \
+DELETED and replaced — never use it to "add" or you'll clobber the lines in \
+that range). write_file is for brand-new files only. After writing a file you \
+already know its contents — don't re-read it to confirm.
 - After you change code, RUN it (run_file/run_command) to prove it works before \
 you finish. Do not claim success you have not verified.
 - When you learn a durable fact about this project (how to run tests, where \
