@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "localcode"
+version = "0.1.0"
+description = "A terminal coding agent tailored to Qwen3.6, with a Cthulhu-themed TUI. Runs on OpenRouter or local quantized GGUF."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "jannis" }]
+keywords = ["llm", "coding-agent", "tui", "qwen", "openrouter", "local-inference"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+]
+# Pure standard library — no runtime dependencies. tomllib is stdlib on 3.11+;
+# on 3.10 config-file reading is skipped gracefully.
+dependencies = []
+
+[project.optional-dependencies]
+# nice-to-haves; the agent works without them
+clipboard = []  # uses system wl-paste/xclip/pngpaste, nothing to pip-install
+
+[project.scripts]
+localcode = "localcode.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jannis/localcode"
+Repository = "https://github.com/jannis/localcode"
+
+[tool.setuptools]
+packages = ["localcode"]

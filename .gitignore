@@ -1,0 +1,17 @@
+# secrets — never commit
+.env
+test.py
+*.key
+
+# localcode runtime state
+.localcode/
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
