@@ -224,7 +224,11 @@ class Session:
         args = {k: v for k, v in call.items() if k != "name"}
         tool = self.registry.get(name)
         if not tool:
-            return f"error: unknown tool '{name}'"
+            valid = ", ".join(self.registry)
+            return (f"error: '{name}' is not a tool, so nothing happened. The ONLY "
+                    f"tools are: {valid}. There is no tool named after an operation "
+                    f"like draw/render/move — to write or change code, use "
+                    f"write_file or replace_lines with the code in a <text> block.")
 
         gate = self._gate(tool, args)
         if gate == "deny":
@@ -289,6 +293,7 @@ class Session:
         force_no_think = False  # next step: think off (e.g. after an empty reply)
         empty_strikes = 0   # consecutive empty replies, to avoid spinning forever
         overflow_retried = False  # emergency context-compaction used once
+        last_sig, same_fail = None, 0   # consecutive identical failing calls
         try:
             while steps < self.cfg.max_steps:
                 if self.cancel_event.is_set():
@@ -420,13 +425,21 @@ class Session:
                         last_error = True
                     # stuck detection: same call repeated, or repeated errors
                     sig = json.dumps(call, sort_keys=True)
+                    same_fail = same_fail + 1 if (not ok and sig == last_sig) else 0
+                    last_sig = sig
                     recent.append((sig, ok))
                     recent = recent[-4:]
+                    # hard break: identical failing call many times in a row would
+                    # otherwise eat the whole step budget (e.g. a hallucinated tool)
+                    if same_fail >= 4:
+                        self.ui.info("stuck repeating the same failing call — stopping "
+                                     "this run so you can redirect it.")
+                        self._save()
+                        return None
                     if not ok and recent.count((sig, False)) >= 2:
-                        obs += ("\n[stuck] You have tried this exact call and it "
-                                "failed before. Do something DIFFERENT: read the "
-                                "file/lines first, or use a different tool. Include "
-                                "every required field (e.g. 'text').")
+                        obs += ("\n[stuck] You have tried this EXACT call and it "
+                                "failed the same way. Do something DIFFERENT now — a "
+                                "different tool or different args. Re-read the error.")
                     elif len([1 for _, o in recent if not o]) >= 3:
                         obs += ("\n[stuck] Several calls in a row failed. Step back: "
                                 "re-read the relevant lines and reconsider the approach.")

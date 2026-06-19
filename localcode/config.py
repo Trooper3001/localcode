@@ -68,7 +68,10 @@ class Config:
     api_key: str = ""
     workspace: pathlib.Path = field(default_factory=lambda: pathlib.Path.cwd())
     user_name: str = ""                   # for a personalized greeting/voice
-    max_steps: int = 24
+    max_steps: int = 40            # ceiling, not a target — the loop stops as soon
+    #                                as the model finishes; raised so non-trivial
+    #                                builds complete in one prompt instead of
+    #                                forcing the user to type "continue".
     ctx_len: int = 32768
     temperature: float = 0.3
     think: bool = True                    # Qwen3.6 reasoning toggle
