@@ -35,6 +35,7 @@ class ToolContext:
     web_enabled: bool = False
     docker_enabled: bool = True
     store: object = None     # store.Store, for the remember() tool
+    todos: list = field(default_factory=list)   # [{content, status}] task checklist
     # per-run change journal for /undo: list of (path, old_text_or_None)
     journal: list = field(default_factory=list)
     # side effects we executed but can't auto-undo (started containers, installs)
@@ -356,6 +357,35 @@ def _docker(sub):
 # web tools (only registered when web_enabled)
 # --------------------------------------------------------------------------- #
 
+_TODO_MARK = {"completed": "x", "done": "x", "in_progress": "~", "doing": "~",
+              "cancelled": "-", "canceled": "-"}
+
+
+def render_todos(todos) -> str:
+    if not todos:
+        return ""
+    lines = []
+    for t in todos:
+        m = _TODO_MARK.get(str(t.get("status", "pending")).lower(), " ")
+        lines.append(f"  [{m}] {t.get('content', '')}")
+    return "\n".join(lines)
+
+
+def _todo(ctx, args):
+    """Plan/track multi-step work — a living checklist (OpenCode-style)."""
+    items = args.get("items") or args.get("todos") or args.get("tasks") or []
+    norm = []
+    for it in items:
+        if isinstance(it, str):
+            norm.append({"content": it, "status": "pending"})
+        elif isinstance(it, dict):
+            norm.append({"content": it.get("content") or it.get("task") or it.get("text", ""),
+                         "status": str(it.get("status", "pending")).lower()})
+    ctx.todos = norm
+    done = sum(1 for t in norm if t["status"] in ("completed", "done", "cancelled", "canceled"))
+    return f"todos ({done}/{len(norm)} done):\n" + render_todos(norm)
+
+
 def _remember(ctx, args):
     fact = (args.get("fact") or args.get("text") or args.get("note")
             or args.get("arg") or args.get("value"))
@@ -418,6 +448,7 @@ def build_registry(ctx: ToolContext) -> dict[str, Tool]:
         Tool("run_command", False, True, "run_command(cmd, timeout=60) — run a shell command", _run_command),
         Tool("run_file", False, True, "run_file(path, timeout=60) — execute a source file", _run_file),
         Tool("remember", False, False, "remember(fact) — save a durable project fact for future sessions", _remember),
+        Tool("todo", False, False, "todo(items=[{content,status}]) — plan/track multi-step work (status: pending|in_progress|completed)", _todo),
     ]
     if ctx.docker_enabled:
         tools += [

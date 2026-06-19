@@ -282,6 +282,7 @@ class Session:
     def run(self, task: str, images=None):
         self.ctx.journal.clear()
         self.ctx.side_effects.clear()
+        self.ctx.todos.clear()
         self.cancel_event.clear()
         if not self.title and task:
             self.title = task[:60]
@@ -294,6 +295,7 @@ class Session:
         empty_strikes = 0   # consecutive empty replies, to avoid spinning forever
         overflow_retried = False  # emergency context-compaction used once
         last_sig, same_fail = None, 0   # consecutive identical failing calls
+        todo_bounces = 0          # times the todo-check has blocked a premature "done"
         try:
             while steps < self.cfg.max_steps:
                 if self.cancel_event.is_set():
@@ -390,6 +392,23 @@ class Session:
                             last_error = True
                             self._save()
                             continue
+                    # todo-check: don't accept "done" with unfinished checklist items
+                    pend = [t for t in self.ctx.todos
+                            if str(t.get("status", "")).lower()
+                            not in ("completed", "done", "cancelled", "canceled")]
+                    if pend and todo_bounces < 2:
+                        todo_bounces += 1
+                        names = "; ".join(t.get("content", "") for t in pend[:6])
+                        self.ui.tool("todo-check", f"{len(pend)} unfinished",
+                                     "not done yet", ok=False)
+                        self.messages.append({"role": "assistant", "content": out})
+                        self.messages.append({"role": "user", "content":
+                            f"<obs>[todo] {len(pend)} unfinished item(s): {names}. "
+                            f"Finish and verify them, or mark them completed/cancelled "
+                            f"via the todo tool, before reporting done.</obs>"})
+                        last_error = True
+                        self._save()
+                        continue
                     self.ui.final(out)
                     self.messages.append({"role": "assistant", "content": out})
                     if self.cfg.review:
@@ -413,6 +432,9 @@ class Session:
                     self.ui.tool(call.get("name", "?"), _summ(
                         {k: v for k, v in call.items() if k != "name"}),
                         obs.splitlines()[0][:80], ok=ok)
+                    if call.get("name") == "todo" and ok:
+                        for line in obs.splitlines()[1:]:
+                            self.ui.info(line)
                     # normalize history to the canonical format (reinforces it,
                     # keeps token cost stable regardless of dialect the model used)
                     assistant_text = _render_call(call)
