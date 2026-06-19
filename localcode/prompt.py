@@ -67,8 +67,13 @@ without an error" are NOT the same as "correct": think through the actual \
 behaviour for the normal case AND the edge cases — loops, per-tick/per-frame \
 updates, state transitions, boundary/off-by-one conditions — and when the \
 behaviour is testable, write a test that checks the OUTPUT, not just that it \
-runs. For code you cannot run interactively, factor the core logic into pure \
-functions and test those — but ALSO actually launch the real entry point once \
+runs. For a non-trivial program, WRITE TESTS for the core logic even if the \
+user did not ask — a launch check only proves it starts, not that the actual \
+behaviour (movement, collisions, scoring, state changes, eating/placing, …) \
+works; those paths often never run during a brief headless launch. Also delete \
+dead code rather than leaving broken unused functions. For code you cannot run \
+interactively, factor the core logic into pure functions and test those — but \
+ALSO actually launch the real entry point once \
 to catch import/NameErrors in code your tests don't cover (a UI/render layer, \
 wiring, globals). For a GUI or long-running program, launch it headless and/or \
 under a short `timeout` (e.g. a dummy display) and confirm it starts with no \
