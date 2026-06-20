@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAC-MAN</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+    }
+    h1 {
+      color: #ffff00;
+      font-size: 48px;
+      text-shadow: 0 0 20px #ffff00, 0 0 40px #ff8800;
+      margin-bottom: 10px;
+      letter-spacing: 8px;
+    }
+    #pacman {
+      border: 2px solid #4444ff;
+      box-shadow: 0 0 30px rgba(68, 68, 255, 0.4), inset 0 0 30px rgba(68, 68, 255, 0.1);
+      border-radius: 4px;
+    }
+    .controls {
+      color: #666;
+      margin-top: 15px;
+      font-size: 13px;
+      text-align: center;
+    }
+    .controls span { color: #ffcc66; }
+  </style>
+</head>
+<body>
+  <h1>PAC-MAN</h1>
+  <canvas id="pacman"></canvas>
+  <div class="controls">
+    <span>Arrow Keys</span> or <span>WASD</span> to move &nbsp;|&nbsp; <span>Enter</span> to restart
+  </div>
+  <script type="module" src="game/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAC-MAN — Neon Arcade</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#000;display:flex;justify-content:center;align-items:center;height:100vh;font-family:'Courier New',monospace;overflow:hidden;user-select:none}
+  #wrapper{position:relative;text-align:center}
+  #hud{display:flex;justify-content:center;gap:40px;margin-bottom:10px;font-size:18px;color:#fff;letter-spacing:2px}
+  #hud .val{color:#ff0;text-shadow:0 0 10px #ff0}
+  #hud .lvs{color:#f44}
+  canvas{display:block;margin:0 auto;border:2px solid #22f;border-radius:4px;box-shadow:0 0 30px rgba(34,34,255,.4),inset 0 0 30px rgba(34,34,255,.1)}
+  #overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;background:rgba(0,0,0,.88);z-index:10;color:#fff;transition:opacity .3s}
+  #overlay.hidden{opacity:0;pointer-events:none}
+  #overlay h1{font-size:52px;color:#ff0;text-shadow:0 0 20px #ff0,0 0 40px #fa0;margin-bottom:10px;letter-spacing:6px}
+  #overlay h2{font-size:36px;color:#f44;text-shadow:0 0 15px #f44;margin-bottom:10px}
+  #overlay .gr{display:flex;gap:20px;margin:15px 0;font-size:14px;letter-spacing:1px}
+  #overlay .gr span{text-shadow:0 0 10px currentColor}
+  #overlay p{font-size:14px;color:#aaa;margin:4px 0}
+  #overlay .prompt{margin-top:20px;font-size:16px;color:#ff0;animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:.4}}
+</style>
+</head>
+<body>
+<div id="wrapper">
+  <div id="hud">
+    <div>SCORE <span class="val" id="scoreEl">0</span></div>
+    <div>HIGH <span class="val" id="hiEl">0</span></div>
+    <div class="lvs" id="lvsEl"></div>
+  </div>
+  <canvas id="c"></canvas>
+  <div id="overlay">
+    <h1>PAC-MAN</h1>
+    <div class="gr">
+      <span style="color:#f00">● BLINKY</span>
+      <span style="color:#f9c">● PINKY</span>
+      <span style="color:#0ff">● INKY</span>
+      <span style="color:#f90">● CLYDE</span>
+    </div>
+    <p>Arrow Keys or WASD to move</p>
+    <p class="prompt">Press ENTER to Start</p>
+  </div>
+</div>
+<script>
+// ── Config ──
+const COLS=21, ROWS=21, T=28, W=COLS*T, H=ROWS*T;
+const cv=document.getElementById('c'), cx=cv.getContext('2d');
+cv.width=W; cv.height=H;
+
+// 0=empty 1=wall 2=dot 3=power 4=ghouse 5=gate
+const MAP=[
+"111111111111111111111",
+"122222222212222222221",
+"131121112112111211131",
+"122222222222222222221",
+"121121211111121211121",
+"122222222212222222221",
+"111121110111011121111",
+"000121100000001121000",
+"111121101555101121111",
+"000000001000100000000",
+"111111101111101111111",
+"000000001555100000000",
+"111111101111101111111",
+"122222222212222222221",
+"121121112112111211121",
+"132122222002222212231",
+"112121111111111212111",
+"122222222212222222221",
+"121111111111111111121",
+"122222222222222222221",
+"111111111111111111111"];
+
+const UP={x:0,y:-1,a:-Math.PI/2}, DN={x:0,y:1,a:Math.PI/2};
+const LT={x:-1,y:0,a:Math.PI}, RT={x:1,y:0,a:0}, NZ={x:0,y:0,a:0};
+ const DIRS=[UP,DN,LT,RT];
+
+const GH_DEF=[
+  {c:'#f00',pen:{x:10,y:8},out:0,scat:{x:19,y:0}},
+  {c:'#f9c',pen:{x:9,y:8},out:120,scat:{x:1,y:0}},
+  {c:'#0ff',pen:{x:10,y:9},out:240,scat:{x:19,y:22}},
+  {c:'#f90',pen:{x:11,y:8},out:360,scat:{x:1,y:22}},
+];
+
+// ── State ──
+let grd,sc=0,lives=3,lvl=1,hi=+localStorage.getItem('pacH')||0;
+let st='title',ft=0,gc=0,fr=0,shakeT=0,shakeX=0,shakeY=0;
+let scatMode=true,scatT=0,particles=[],ready=0;
+let pm={};
+let gh=[];
+
+// ── Helpers ──
+function pMap(m){return m.map(r=>r.split('').map(Number));}
+function walk(c,r){
+  if(r<0||r>=ROWS)return false;
+  if(c<0||c>=COLS)return true;
+  let v=grd[r][c];
+  return v!==1&&v!==4;
+}
+function atCenter(vx,vy){
+  let tc=Math.round(vx/T),tr=Math.round(vy/T);
+  let ccx=tc*T+T/2,ccy=tr*T+T/2;
+  return Math.abs(vx-ccx)<1.5&&Math.abs(vy-ccy)<1.5;
+}
+
+// ── Pacman ──
+function mkPM(){pm={x:10*T+T/2,y:15*T+T/2,gc:10,gr:15,d:NZ,nd:NZ,spd:2.5,m:0,md:1};}
+
+function upPM(){
+  if(atCenter(pm.x,pm.y)){
+    pm.gc=Math.round((pm.x-T/2)/T); pm.gr=Math.round((pm.y-T/2)/T);
+    pm.x=pm.gc*T+T/2; pm.y=pm.gr*T+T/2;
+    // Try next direction
+    if(pm.nd!==NZ){
+      let nc=pm.gc+pm.nd.x,nr=pm.gr+pm.nd.y;
+      if(walk(nc,nr)){pm.d=pm.nd;pm.nd=NZ;}
+    }
+    // Check current direction
+    let fc=pm.gc+pm.d.x,fr=pm.gr+pm.d.y;
+    if(!walk(fc,fr)) pm.d=NZ;
+  }
+  // Move
+  if(pm.d!==NZ){pm.x+=pm.d.x*pm.spd;pm.y+=pm.d.y*pm.spd;}
+  // Tunnel
+  if(pm.x<-T/2)pm.x=W+T/2; if(pm.x>W+T/2)pm.x=-T/2;
+  // Mouth
+  pm.m+=.12*pm.md; if(pm.m>.85)pm.md=-1; if(pm.m<.05)pm.md=1;
+  // Eat
+  let tc=Math.round((pm.x-T/2)/T),tr=Math.round((pm.y-T/2)/T);
+  if(tr>=0&&tr<ROWS&&tc>=0&&tc<COLS){
+    if(grd[tr][tc]===2){grd[tr][tc]=0;sc+=10;}
+    else if(grd[tr][tc]===3){
+      grd[tr][tc]=0;sc+=50;gc=0;ft=360;
+      gh.forEach(g=>{if(!g.dead&&g.out){g.fri=true;g.d={x:-g.d.x,y:-g.d.y};}});
+    }
+  }
+}
+
+function drPM(c){
+  let r=T/2-3;
+  c.save();c.translate(pm.x,pm.y);c.rotate(pm.d.a);
+  c.beginPath();c.arc(0,0,r,pm.m,Math.PI*2-pm.m);c.lineTo(0,0);c.closePath();
+  c.fillStyle='#ff0';c.shadowColor='#ff0';c.shadowBlur=18;c.fill();
+  // Eye
+  c.shadowBlur=0;c.fillStyle='#000';
+  c.beginPath();c.arc(r*.4,-r*.4,2,0,Math.PI*2);c.fill();
+  c.restore();
+}
+
+// ── Particles ──
+class Pt{
+  constructor(x,y,cl){this.x=x;this.y=y;this.c=cl;this.vx=(Math.random()-.5)*6;this.vy=(Math.random()-.5)*6;this.l=1;this.dc=.012+Math.random()*.025;this.r=2+Math.random()*3;}
+  update(){this.x+=this.vx;this.y+=this.vy;this.l-=this.dc;}
+  draw(c){c.save();c.globalAlpha=Math.max(0,this.l);c.fillStyle=this.c;c.shadowColor=this.c;c.shadowBlur=8;c.beginPath();c.arc(this.x,this.y,Math.max(0,this.r),0,Math.PI*2);c.fill();c.restore();}
+}
+function boom(x,y,cl,n=14){for(let i=0;i<n;i++)particles.push(new Pt(x,y,cl));}
+
+// ── Ghosts ──
+function mkGH(){
+  gh=GH_DEF.map((d,i)=>({
+    i,n:d.i||i,c:d.c,pen:d.pen,scat:d.scat,
+    x:d.pen.x*T+T/2,y:d.pen.y*T+T/2,gc:d.pen.x,gr:d.pen.y,
+    d:UP,spd:1.8,out:d.out===0,outT:d.out,fri:false,dead:false
+  }));
+}
+
+function gTgt(g){
+  let px=Math.round(pm.x/T),py=Math.round(pm.y/T);
+  if(g.dead) return {x:10,y:9};
+  if(g.fri) return {x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)};
+  if(scatMode) return g.scat;
+  switch(g.i){
+    case 0: return {x:px,y:py};
+    case 1: return {x:px+pm.d.x*4,y:py+pm.d.y*4};
+    case 2:{let bx=Math.round(gh[0].x/T),by=Math.round(gh[0].y/T);
+      return {x:px*2+pm.d.x*2-bx,y:py*2+pm.d.y*2-by};}
+    case 3: let ddx=Math.abs(g.gc-px)+Math.abs(g.gr-py);
+      return ddx>8?{x:px,y:py}:g.scat;
+  }
+  return {x:px,y:py};
+}
+
+function upGH(g){
+  // Release from pen
+  if(!g.out){g.outT--;if(g.outT<=0){g.out=true;g.x=10*T+T/2;g.y=8*T+T/2;}return;}
+  // Dead ghost returns to house
+  if(g.dead){
+    if(g.gc>=10&&g.gc<=10&&g.gr>=8&&g.gr<=9){g.dead=false;g.fri=false;}
+  }
+  let sp=g.fri?1.05:g.dead?4:g.spd;
+  g.x+=g.d.x*sp; g.y+=g.d.y*sp;
+  g.gc=Math.round(g.x/T); g.gr=Math.round(g.y/T);
+  // At tile center, choose new direction
+  let ccx=g.gc*T+T/2, ccy=g.gr*T+T/2;
+  if(Math.abs(g.x-ccx)<sp+0.5 && Math.abs(g.y-ccy)<sp+0.5){
+    g.x=ccx;g.y=ccy;
+    let tgt=gTgt(g), opp={x:-g.d.x,y:-g.d.y};
+    let best=null,bestD=1e9;
+    DIRS.forEach(dd=>{
+      let nc=g.gc+dd.x,nr=g.gr+dd.y;
+      if(nc<0||nc>=COLS) return; // allow tunnel
+      if(nr<0||nr>=ROWS) return;
+      let v=grd[nr][nc];
+      if(v===1||v===4) return;
+      // Gate: dead ghosts can walk it, normal ghosts cannot
+      if(v===5 && !g.dead) return;
+      // No 180° turn except when frightened (already reversed)
+      if(!g.fri && dd.x===opp.x && dd.y===opp.y) return;
+      let d2=(nc-tgt.x)**2+(nr-tgt.y)**2;
+      if(d2<bestD){bestD=d2;best=dd;}
+    });
+    if(best) g.d=best;
+  }
+  // Tunnel
+  if(g.x<-T/2)g.x=W+T/2; if(g.x>W+T/2)g.x=-T/2;
+}
+
+function drGH(c,g){
+  if(!g.out && !g.dead) return;
+  let x=g.x,y=g.y,r=T/2-3;
+  if(g.dead){
+    // Eyes only
+    c.fillStyle='#33f';c.shadowColor='#33f';c.shadowBlur=6;
+    c.beginPath();c.arc(x-4,y-2,3.5,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(x+4,y-2,3.5,0,Math.PI*2);c.fill();
+    c.shadowBlur=0;c.fillStyle='#fff';
+    c.beginPath();c.arc(x-3,y-1,1.5,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(x+5,y-1,1.5,0,Math.PI*2);c.fill();
+    return;
+  }
+  let col=g.fri?'#22f':g.c;
+  c.fillStyle=col;c.shadowColor=col;c.shadowBlur=12;
+  c.beginPath();
+  c.arc(x,y-3,r,Math.PI,0,false);
+  c.lineTo(x+r,y+r);
+  let wv=fr*.15;
+  for(let i=0;i<4;i++){
+    let bx=x+r-i*r*.5;
+    c.lineTo(bx-r/8,y+r-3+(i%2?Math.sin(wv+i)*2.5:0));
+  }
+  c.lineTo(x-r,y+r);c.closePath();c.fill();c.shadowBlur=0;
+  // Eyes
+  c.fillStyle='#fff';
+  c.beginPath();c.arc(x-4,y-4,3.5,0,Math.PI*2);c.fill();
+  c.beginPath();c.arc(x+4,y-4,3.5,0,Math.PI*2);c.fill();
+  let lx=g.d.x*1.5,ly=g.d.y*1.5;
+  c.fillStyle=g.fri?'#f88':'#33f';
+  c.beginPath();c.arc(x-4+lx,y-4+ly,2,0,Math.PI*2);c.fill();
+  c.beginPath();c.arc(x+4+lx,y-4+ly,2,0,Math.PI*2);c.fill();
+  // Frightened mouth
+  if(g.fri){
+    c.strokeStyle='#fff';c.lineWidth=1;c.beginPath();
+    for(let i=0;i<5;i++){
+      let mx=x-6+i*3;
+      i?c.lineTo(mx,y+3+(i%2?-1.5:1.5)):c.moveTo(mx,y+3+(i%2?0:-1.5));
+    }
+    c.stroke();
+  }
+}
+
+// ── Maze ──
+let wLines=[];
+function calcWL(){
+  wLines=[];
+  for(let r=0;r<ROWS;r++)for(let cc=0;cc<COLS;cc++){
+    if(grd[r][cc]!==1)continue;
+    let x=cc*T,y=r*T;
+    if(r===0||grd[r-1][cc]!==1)wLines.push([x,y,x+T,y]);
+    if(r===ROWS-1||grd[r+1][cc]!==1)wLines.push([x,y+T,x+T,y+T]);
+    if(cc===0||grd[r][cc-1]!==1)wLines.push([x,y,x,y+T]);
+    if(cc===COLS-1||grd[r][cc+1]!==1)wLines.push([x+T,y,x+T,y+T]);
+  }
+}
+
+function drMZ(c){
+  c.fillStyle='#000';c.fillRect(0,0,W,H);
+  // Walls
+  c.strokeStyle='#22f';c.shadowColor='#44f';c.shadowBlur=8;
+  c.lineWidth=2;c.lineCap='round';
+  wLines.forEach(([x1,y1,x2,y2])=>{c.beginPath();c.moveTo(x1,y1);c.lineTo(x2,y2);c.stroke();});
+  c.shadowBlur=0;
+  // Dots & items
+  for(let r=0;r<ROWS;r++)for(let cc=0;cc<COLS;cc++){
+    let v=grd[r][cc],px=cc*T+T/2,py=r*T+T/2;
+    if(v===5){c.fillStyle='#f88';c.fillRect(cc*T,r*T+T/2-2,T,4);}
+    else if(v===2){c.fillStyle='#ffa';c.shadowColor='#ffa';c.shadowBlur=4;
+      c.beginPath();c.arc(px,py,2.5,0,Math.PI*2);c.fill();c.shadowBlur=0;}
+    else if(v===3){
+      let p=Math.sin(fr*.08)*.3+.7;
+      c.globalAlpha=p;c.fillStyle='#ffa';c.shadowColor='#ffa';c.shadowBlur=15;
+      c.beginPath();c.arc(px,py,7,0,Math.PI*2);c.fill();
+      c.shadowBlur=0;c.globalAlpha=1;
+    }
+  }
+}
+
+// ── Collision ──
+function chkCol(){
+  gh.forEach(g=>{
+    if(!g.out||g.dead)return;
+    let dx=pm.x-g.x,dy=pm.y-g.y;
+    if(dx*dx+dy*dy<(T/2-2)**2){
+      if(g.fri){
+        g.dead=true;g.fri=false;gc++;
+        sc+=200*Math.pow(2,gc-1);
+        boom(g.x,g.y,'#fff',16);shakeT=10;
+      } else {
+        boom(pm.x,pm.y,'#ff0',20);shakeT=15;lives--;
+        if(lives<=0){
+          if(sc>hi){hi=sc;localStorage.setItem('pacH',hi);}
+          st='gameover';showOvr('GAME OVER','Score: '+sc,true);
+        } else {
+          rstPos();st='ready';ready=90;showOvr('Get Ready!','',false);
+        }
+      }
+    }
+  });
+}
+
+function chkWin(){
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)
+    if(grd[r][c]===2||grd[r][c]===3) return;
+  lvl++;grd=pMap(MAP);calcWL();rstPos();
+  st='ready';ready=120;showOvr('LEVEL '+lvl,'Score: '+sc,false);
+}
+
+function rstPos(){mkPM();mkGH();ft=0;gc=0;scatMode=true;scatT=0;}
+
+function updModes(){
+  scatT++;
+  if(scatT<420) scatMode=true;
+  else if(scatT<1020) scatMode=false;
+  else {scatT=0;scatMode=true;}
+}
+
+// ── Overlay ──
+const ovr=document.getElementById('overlay');
+function showOvr(t,s,f){
+  ovr.classList.remove('hidden');
+  let gh='';
+  if(t==='PAC-MAN'){
+    gh=`<div class="gr"><span style="color:#f00">● BLINKY</span><span style="color:#f9c">● PINKY</span>
+<span style="color:#0ff">● INKY</span><span style="color:#f90">● CLYDE</span></div>
+<p>Arrow Keys or WASD to move</p>`;
+  }
+  if(f){
+    gh=`<div class="gr"><span style="color:#f00">● BLINKY</span><span style="color:#f9c">● PINKY</span>
+<span style="color:#0ff">● INKY</span><span style="color:#f90">● CLYDE</span></div>`;
+  }
+  ovr.innerHTML=`<h1 style="${t==='PAC-MAN'?'':''}${!f&&t!=='PAC-MAN'?'color:#f44;text-shadow:0 0 15px #f44;font-size:36px;':''}">${t}</h1>
+${s?'<p style="color:#fff;font-size:18px">'+s+'</p>':''}${gh}
+<p class="prompt">Press ENTER ${f?'to replay':'to continue'}</p>`;
+}
+
+// ── HUD ──
+function uHud(){
+  document.getElementById('scoreEl').textContent=sc;
+  document.getElementById('hiEl').textContent=Math.max(sc,hi);
+  document.getElementById('lvsEl').textContent='♥'.repeat(Math.max(0,lives)).fontcolor('#f44');
+}
+
+// ── Input ──
+document.addEventListener('keydown',e=>{
+  if(st==='title'||st==='gameover'){if(e.key==='Enter'){e.preventDefault();initG();return;}}
+  if(st==='ready'&&e.key==='Enter'){st='playing';ovr.classList.add('hidden');e.preventDefault();return;}
+  switch(e.key){
+    case'ArrowUp':case'w':case'W':pm.nd=UP;break;
+    case'ArrowDown':case's':case'S':pm.nd=DN;break;
+    case'ArrowLeft':case'a':case'A':pm.nd=LT;break;
+    case'ArrowRight':case'd':case'D':pm.nd=RT;break;
+  }
+  e.preventDefault();
+});
+
+// ── Init ──
+function initG(){
+  grd=pMap(MAP);calcWL();sc=0;lives=3;lvl=1;particles=[];
+  rstPos();st='playing';ovr.classList.add('hidden');
+}
+
+// ── Loop ──
+function loop(){
+  fr++;
+  if(st==='playing'){
+    upPM();gh.forEach(g=>upGH(g));
+    chkCol();chkWin();updModes();
+    if(ft>0){ft--;if(ft===0)gh.forEach(g=>g.fri=false);}
+  }
+  if(st==='ready'){ready--;if(ready<=0){st='playing';ovr.classList.add('hidden');}}
+  if(shakeT>0){shakeT--;shakeX=(Math.random()-.5)*4;shakeY=(Math.random()-.5)*4;}
+  else{shakeX=0;shakeY=0;}
+  particles.forEach(p=>p.update());particles=particles.filter(p=>p.l>0);
+  cx.save();cx.translate(shakeX,shakeY);
+  drMZ(cx);
+  if(st==='playing'||st==='ready'){drPM(cx);gh.forEach(g=>drGH(cx,g));}
+  particles.forEach(p=>p.draw(cx));
+  cx.restore();
+  uHud();requestAnimationFrame(loop);
+}
+
+// ── Start ──
+grd=pMap(MAP);calcWL();mkPM();mkGH();
+uHud();loop();
+</script>
+</body>
+</html>

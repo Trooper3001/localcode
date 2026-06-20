@@ -15,7 +15,7 @@ loops**. See [`SPEC.md`](SPEC.md) for the full design.
 Needs Python 3.10+. Zero runtime dependencies (stdlib only).
 
 ```bash
-git clone https://github.com/jannis/localcode && cd localcode
+git clone https://github.com/Trooper3001/localcode && cd localcode
 ./install.sh            # installs the `localcode` command + runs first-time setup
 ```
 
@@ -215,6 +215,16 @@ localcode/
   clipboard.py screenshot paste for vision
   cli.py       one-shot + interactive (TUI / plain REPL)
 ```
+
+## Benchmarks
+
+Real, browser-verified comparisons against other terminal coding agents, same
+model, same task, judged by whether the output actually runs and plays
+correctly (not just whether it looks plausible).
+
+- [`benchmark/pacman/`](benchmark/pacman/README.md) — Pac-Man clone vs.
+  Qwen Code and opencode (all on `qwen/qwen3.6-27b`). localcode's build was
+  the only one with no functional or logic bugs once fairly tested.
 
 ## Status (see SPEC §12 milestones)
 
